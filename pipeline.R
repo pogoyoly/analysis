@@ -85,6 +85,10 @@ yield_dependant_cost_per_dt<-c(4.04,4.04,4.04,5.67,25.96,26.47,0,1.29,0,0,0)
 
 other_variable_costs_per_hectare<-c(632.4,658.1,572.2,744.1,624.7,577.2,1339,2197.9,0,0,0)
 
+# Final economic model for each grid cell
+ calculate_gross_margin_grid_cell(74.3, 27.81, 1, 2.11,
+                                  4.04, 632.4, 0.55,
+                                  2.22, 1, 1,1)
 
 #############
 # step 6 run calculate_gross_margin_grid_cell so it calculates gross margin on each cell and return a corresponding matrix
@@ -179,13 +183,13 @@ calculate_other_variable_costs <- function(cost_per_area) {
 
 
 # Final economic model for each grid cell
-calculate_gross_margin_grid_cell <- function(yields, sales_prices, gov_payments, fert_cost,
-                                             yield_cost, other_cost, nutrient_removal,
-                                             nutrient_prices, cost_per_yield, cost_per_area,edge_factor) {
+calculate_gross_margin_grid_cell <- function(yields, sales_prices, gov_payments,
+                                             nutrient_removal,nutrient_prices, cost_per_yield,
+                                             cost_per_area,edge_factor) {
   # Calculate revenue
   revenue <- calculate_revenue(yields, sales_prices, gov_payments)
 
-  # Adjust fertilizer costs for nitrogen fixation
+  # fertlizer cost + adjusted for nitrogen fixation
   fert_amounts<-calculate_fertilizer_amount(yields, nutrient_removal, edge_factor)
 
   # Total fertilizer costs
