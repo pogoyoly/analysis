@@ -1,5 +1,6 @@
 library(LGrafEU)
-
+library(raster)
+library(terra)
 #############
 # step 1 create map
 ############
@@ -9,8 +10,8 @@ library(LGrafEU)
 # % arabal land considered as perm grassland 0-5
 # seminal natural habitat 1 - arable area randomly divided between forest and grassland
 
-calcGras<- 10
-forest <- 10
+calcGras<- 25
+forest <- 25
 arable <- 100 - calcGras - forest
 
 r<-generate_perlin_noise(200,200,1,2,3,0.01,TRUE,cat_method = "land_percentage", percetange= (100 - forest))
@@ -56,47 +57,105 @@ field_map_with_crops<-plot_by_crop(field_map,method = 2)
 # step 4 add the field edges
 ############
 #edge width 0-10
-edge <- 1
+edge <- 10
 field_map_dist<-raster::disaggregate(field_map_with_crops, fact=10)
 r <- raster::raster(raster::extent(field_map_dist), resolution = 1)
 lines <- as(polygons, "SpatialLines")
 distance_buffer <- raster::buffer(lines, width = edge)
 rasterized_lines <- raster::rasterize(distance_buffer, r,field=1)
 raster::plot(rasterized_lines)
+rasterized_lines[is.na(rasterized_lines[])] <- 0
+plot(rasterized_lines)
+#raster::values(rasterized_lines) <- ifelse(raster::values(rasterized_lines) == 1, 10, 0)
 
+edge_adder <- function(x, y) {
+  y[x == 1] <- 12  # If x equals 1, set y to 11
+  return(y)        # Return the modified y values
+}
 
+# Apply the function using overlay
+field_map_dist_w_edge <- overlay(rasterized_lines, field_map_dist, fun = edge_adder)
 
 #############
 # step 5 setup the price/yield/cost metrixes
 ############
-yield_dt_per_hecatre<-c(74.3,68.2,50.0,96.5,35.8,52.2,797.3,438.5,0,0)
+yield_dt_per_hecatre<-c(74.3,68.2,50.0,96.5,35.8,52.2,797.3,438.5,0,0,0,0)
+yield_dt_per_cell<-yield_dt_per_hecatre / 10000
+price_per_dt<-c(27.81,22.74,28.95,27.03,56.64,32.53,5.58,24.32,0,0,0,0)
 
-price_per_dt<-c(27.81,22.74,28.95,27.03,56.64,32.53,5.58,24.32,0,0)
+nutrient_removal_kg_per_dt_N<-c(2.11,1.65,1.38,1.38,3.35, -4.5, 0.18, 0.35 ,0 ,0,0,0)
 
-nutrient_removal_kg_per_dt_N<-c(2.11,1.65,1.38,1.38,3.35, -4.5, 0.18, 0.35 ,0 ,0)
+nutrient_removal_kg_per_dt_PO <-c(0.8,0.8,0.8,0.8,1.8,1.0,0.1,0.14,0,0,0,0)
 
-nutrient_removal_kg_per_dt_PO <-c(0.8,0.8,0.8,0.8,1.8,1.0,0.1,0.14,0,0)
+nutrient_removal_kg_per_dt_K<-c(0.55,0.6,0.6,0.5,1.0,1.0,0.25,0.6,0,0,0,0)
 
-nutrient_removal_kg_per_dt_K<-c(0.55,0.6,0.6,0.5,1.0,1.0,0.25,0.6,0,0)
+fertilizer_cost_per_kg<-c(2.22,1.18,1.38,0)
 
-fertilizer_cost_per_kg<-c(2.22,1.18,1.38)
+yield_dependant_cost_per_dt<-c(4.04,4.04,4.04,5.67,25.96,26.47,0,1.29,0,0,0,0,0)
 
-yield_dependant_cost_per_dt<-c(4.04,4.04,4.04,5.67,25.96,26.47,0,1.29,0,0,0)
+other_variable_costs_per_hectare<-c(632.4,658.1,572.2,744.1,624.7,577.2,1339,2197.9,0,0,0,0,0)
+other_variable_costs_per_cell<-other_variable_costs_per_hectare/10000
+government_payments<-c(0,0,0,0,0,0,0,0,0,0,0,0)
 
-other_variable_costs_per_hectare<-c(632.4,658.1,572.2,744.1,624.7,577.2,1339,2197.9,0,0,0)
-
-# Final economic model for each grid cell
- calculate_gross_margin_grid_cell(74.3, 27.81, 1, 2.11,
-                                  4.04, 632.4, 0.55,
-                                  2.22, 1, 1,1)
 
 #############
 # step 6 run calculate_gross_margin_grid_cell so it calculates gross margin on each cell and return a corresponding matrix
 ############
 
 
+ # Final economic model for each grid cell
+ calculate_gross_margin_grid_cell <- function(cell_value,edge,yield_dt_per_cell,price_per_dt,nutrient_removal_kg_per_dt_N,
+                                              nutrient_removal_kg_per_dt_PO, nutrient_removal_kg_per_dt_K,fertilizer_cost_per_kg,
+                                              yield_dependant_cost_per_dt, other_variable_costs_per_cell, government_payments) {
 
 
+   yields <- yield_dt_per_cell[cell_value]
+   price <- price_per_dt[cell_value]
+   nutrient_removal_N <- nutrient_removal_kg_per_dt_N[cell_value]
+   nutrient_removal_PO <- nutrient_removal_kg_per_dt_PO[cell_value]
+   nutrient_removal_K <- nutrient_removal_kg_per_dt_K[cell_value]
+   fertilizer_cost_per_kg
+   yield_cost <- yield_dependant_cost_per_dt[cell_value]
+   other_cost <- other_variable_costs_per_cell[cell_value]
+   gov_payment <- government_payments[cell_value]
+
+   # Calculate revenue
+   revenue <- calculate_revenue(yields, price, gov_payment)
+
+   # fertlizer cost + adjusted for nitrogen fixation
+   fert_amounts<-calculate_fertilizer_amount(yields, nutrient_removal_N,
+                                             nutrient_removal_PO, nutrient_removal_K,1)
+
+   # Total fertilizer costs
+   fert_cost <- calculate_total_fertilizer_costs(fert_amounts, fertilizer_cost_per_kg)
+
+   # Yield-dependent costs
+   yield_costs <- calculate_yield_costs(yields, yield_cost)
+
+   # Other variable costs
+   other_costs <- calculate_other_variable_costs(other_cost)
+
+   # Gross margin
+   gross_margin <- calculate_gross_margin(revenue, fert_cost, yield_costs, other_costs)
+   return(gross_margin)
+ }
+
+ apply_function_to_raster <- function(cell_value) {
+   if (is.na(cell_value) || cell_value ==0) {
+     return(NA)  # Handle NA values
+   }
+   return(calculate_gross_margin_grid_cell(cell_value,edge, yield_dt_per_cell, price_per_dt,
+                                           nutrient_removal_kg_per_dt_N, nutrient_removal_kg_per_dt_PO,
+                                           nutrient_removal_kg_per_dt_K, fertilizer_cost_per_kg,
+                                           yield_dependant_cost_per_dt, other_variable_costs_per_cell,
+                                           government_payments))
+ }
+
+ # Use calc to apply the function across the raster
+ output_raster <- calc(field_map_dist_w_edge, apply_function_to_raster)
+ plot(output_raster)
+ raster_sum <- cellStats(output_raster, stat = 'sum')
+ raster_sum/400
 #############
 # step 7 arrange a full list of matrices of intrest in a dataframe
 ############
@@ -116,7 +175,7 @@ other_variable_costs_per_hectare<-c(632.4,658.1,572.2,744.1,624.7,577.2,1339,219
 # gerneral bee indexes from poll4pop
 
 #########################
-# econ model
+# all functions for the econ model
 ########################
 
 # Input: Revenue, fertilizer costs, yield-dependent costs, other costs for each grid cell
@@ -142,9 +201,19 @@ calculate_revenue <- function(yields, sales_prices, gov_payments) {
 
 
 # Input: Expected yields, nutrient removal, edge factor, crop shares
-calculate_fertilizer_amount <- function(expected_yields, nutrient_removal, edge_factor) {
+calculate_fertilizer_amount <- function(yields, nutrient_removal_N,
+                                        nutrient_removal_PO, nutrient_removal_K,edge_factor ) {
+
+  #for narrow 1.048
+
+  #for broad 1.052
+
   # Calculate fertilizer amount for each crop and nutrient
-  fert_amounts <- expected_yields * nutrient_removal * edge_factor
+  fert_amounts_N <- yields * nutrient_removal_N * edge_factor
+  fert_amounts_PO <- yields * nutrient_removal_PO * edge_factor
+  fert_amounts_K <- yields * nutrient_removal_K * edge_factor
+
+  fert_amounts <- c(fert_amounts_N,fert_amounts_PO,fert_amounts_K)
 
   return(fert_amounts)
 }
@@ -161,7 +230,7 @@ adjust_fertilizer_amounts_nitrogen <- function(fert_amounts_nitrogen,yields, nit
 # Input: Fertilizer amounts, nutrient prices
 calculate_total_fertilizer_costs <- function(fert_amounts, nutrient_prices) {
   # Total fertilizer costs
-  total_fertilizer_costs <- fert_amounts * nutrient_prices
+  total_fertilizer_costs <- fert_amounts[1] * nutrient_prices[1] +fert_amounts[2] * nutrient_prices[2] +fert_amounts[3] * nutrient_prices[3]
   return(total_fertilizer_costs)
 }
 
@@ -208,6 +277,9 @@ calculate_gross_margin_grid_cell <- function(yields, sales_prices, gov_payments,
 
 
 
+
+
+
 #########################
 # yield model
 ########################
@@ -232,6 +304,8 @@ adjust_yield_for_pollination <- function(yield_condition, yield_sensitive_crop, 
 
 
 adjust_yield_for_edge_effects <- function(yield, edge_factor) {
+
+  #0.952 for cells within a 25 meter radius of cell
   # Adjust yield for edge effects
   adjusted_yield <- yield * edge_factor
   return(adjusted_yield)
