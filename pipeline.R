@@ -1,0 +1,339 @@
+library(LGrafEU)
+
+#############
+# step 1 create map
+############
+#mean field size 1-3 HA
+#field sd 1-3 HA
+#cover of arable land 50-90%
+# % arabal land considered as perm grassland 0-5
+# seminal natural habitat 1 - arable area randomly divided between forest and grassland
+
+calcGras<- 10
+forest <- 10
+arable <- 100 - calcGras - forest
+
+r<-generate_perlin_noise(200,200,1,2,3,0.01,TRUE,cat_method = "land_percentage", percetange= (100 - forest))
+raster::plot(r)
+test<-establish_by_place_conquer(potential_space= r,
+                                 cell_size=10,
+                                 includsion_value = 1,
+                                 mean_field_size = 1000,
+                                 sd_field_size = 25,
+                                 distribution = "norm",
+                                 mean_shape_index = 1,
+                                 sd_shape_index = 0.3,
+                                 percent = ( 100 - (calcGras / (100 - forest)) * 100 ),
+                                 assign_farmers = TRUE,
+                                 assign_mode = 2,
+                                 mean_fields_per_farm = 3,
+                                 sd_fields_per_farm = 3)
+
+
+
+raster::plot(test$map)
+
+
+field_map<-test$map
+raster::values(field_map) <- ifelse(raster::values(field_map) > 0, 1, NA)
+raster::plot(field_map,add = TRUE)
+polygons <- raster::rasterToPolygons(test$map, n=8,fun=function(x){x > 0}, na.rm=TRUE, digits=12, dissolve=TRUE)
+raster::plot(polygons, add = TRUE, border = "black", lwd = 1)
+
+
+#############
+# step 2 distribute crops (needs to be done each year)
+############
+
+crops_matrix <- data.frame(crop = c("winter wheat", "winter barley", "summer barley", "maize" ,"oilseed", "peas", "sugar beet", "potatoe", "alfalfa", "lay", "flower strips"),
+                           percentage = c(0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0),
+                           index = c(1,2,3,4,5,6,7,8,9,10,11))  # Desired percentages
+field_map<-distrubution_by_percent(test,crops_matrix)
+field_map_with_crops<-plot_by_crop(field_map,method = 2)
+
+
+#############
+# step 4 add the field edges
+############
+#edge width 0-10
+edge <- 1
+field_map_dist<-raster::disaggregate(field_map_with_crops, fact=10)
+r <- raster::raster(raster::extent(field_map_dist), resolution = 1)
+lines <- as(polygons, "SpatialLines")
+distance_buffer <- raster::buffer(lines, width = edge)
+rasterized_lines <- raster::rasterize(distance_buffer, r,field=1)
+raster::plot(rasterized_lines)
+
+
+
+#############
+# step 5 setup the price/yield/cost metrixes
+############
+yield_dt_per_hecatre<-c(74.3,68.2,50.0,96.5,35.8,52.2,797.3,438.5,0,0)
+
+price_per_dt<-c(27.81,22.74,28.95,27.03,56.64,32.53,5.58,24.32,0,0)
+
+nutrient_removal_kg_per_dt_N<-c(2.11,1.65,1.38,1.38,3.35, -4.5, 0.18, 0.35 ,0 ,0)
+
+nutrient_removal_kg_per_dt_PO <-c(0.8,0.8,0.8,0.8,1.8,1.0,0.1,0.14,0,0)
+
+nutrient_removal_kg_per_dt_K<-c(0.55,0.6,0.6,0.5,1.0,1.0,0.25,0.6,0,0)
+
+fertilizer_cost_per_kg<-c(2.22,1.18,1.38)
+
+yield_dependant_cost_per_dt<-c(4.04,4.04,4.04,5.67,25.96,26.47,0,1.29,0,0,0)
+
+other_variable_costs_per_hectare<-c(632.4,658.1,572.2,744.1,624.7,577.2,1339,2197.9,0,0,0)
+
+
+#############
+# step 6 run calculate_gross_margin_grid_cell so it calculates gross margin on each cell and return a corresponding matrix
+############
+
+
+
+
+#############
+# step 7 arrange a full list of matrices of intrest in a dataframe
+############
+
+#total edge length
+#OSR yiled per landscape
+#gross margin per landscape
+#OSR yeild per hecater
+#gross margin per hectare
+#forest cover
+#calcerous grassland cover
+#field size mean/sd
+#field shape mean/sd
+#edge size
+# contribution of insect polination
+# contribution of insect polination to gross margin
+# gerneral bee indexes from poll4pop
+
+#########################
+# econ model
+########################
+
+# Input: Revenue, fertilizer costs, yield-dependent costs, other costs for each grid cell
+calculate_gross_margin <- function(revenue, fert_cost, yield_cost, other_cost) {
+  # Total variable costs
+  total_variable_costs <- fert_cost + yield_cost + other_cost
+
+  # Gross margin
+  gross_margin <- revenue - total_variable_costs
+  return(gross_margin)
+}
+
+
+# Input: Yields, sales prices, gov payments, crop shares
+calculate_revenue <- function(yields, sales_prices, gov_payments) {
+  # Calculate revenue for each crop
+  revenue_crops <- (yields * sales_prices + gov_payments)
+
+  # Total revenue by summing crop-specific revenues
+  total_revenue <- sum(revenue_crops)
+  return(total_revenue)
+}
+
+
+# Input: Expected yields, nutrient removal, edge factor, crop shares
+calculate_fertilizer_amount <- function(expected_yields, nutrient_removal, edge_factor) {
+  # Calculate fertilizer amount for each crop and nutrient
+  fert_amounts <- expected_yields * nutrient_removal * edge_factor
+
+  return(fert_amounts)
+}
+
+
+# Input: Fertilizer costs, nitrogen fixation yields, nitrogen surplus rates, crop shares
+adjust_fertilizer_amounts_nitrogen <- function(fert_amounts_nitrogen,yields, nitrogen_surplus_rate) {
+  # Adjust fertilizer costs by subtracting nitrogen fixation
+  adjusted_fert_costs <- fert_amounts_nitrogen - (yields * nitrogen_surplus_rate)
+  return(adjusted_fert_costs)
+}
+
+
+# Input: Fertilizer amounts, nutrient prices
+calculate_total_fertilizer_costs <- function(fert_amounts, nutrient_prices) {
+  # Total fertilizer costs
+  total_fertilizer_costs <- fert_amounts * nutrient_prices
+  return(total_fertilizer_costs)
+}
+
+
+# Input: Yields, cost per yield unit
+calculate_yield_costs <- function(yields, cost_per_yield) {
+  # Yield-dependent costs
+  yield_costs <- yields * cost_per_yield
+  return(yield_costs)
+}
+
+
+# Input: Crop shares, cost per hectare
+calculate_other_variable_costs <- function(cost_per_area) {
+  # Other variable costs
+  other_costs <- sum(cost_per_area)
+  return(other_costs)
+}
+
+
+# Final economic model for each grid cell
+calculate_gross_margin_grid_cell <- function(yields, sales_prices, gov_payments, fert_cost,
+                                             yield_cost, other_cost, nutrient_removal,
+                                             nutrient_prices, cost_per_yield, cost_per_area,edge_factor) {
+  # Calculate revenue
+  revenue <- calculate_revenue(yields, sales_prices, gov_payments)
+
+  # Adjust fertilizer costs for nitrogen fixation
+  fert_amounts<-calculate_fertilizer_amount(yields, nutrient_removal, edge_factor)
+
+  # Total fertilizer costs
+  fert_cost <- calculate_total_fertilizer_costs(fert_amounts, nutrient_prices)
+
+  # Yield-dependent costs
+  yield_cost <- calculate_yield_costs(yields, cost_per_yield)
+
+  # Other variable costs
+  other_cost <- calculate_other_variable_costs(cost_per_area)
+
+  # Gross margin
+  gross_margin <- calculate_gross_margin(revenue, fert_cost, yield_cost, other_cost)
+  return(gross_margin)
+}
+
+
+
+#########################
+# yield model
+########################
+
+#this equations is not reproducable from the paper
+calculate_yield <- function(site_quality, coefficients) {
+  # coefficients: a vector of length 2 (intercept, slope)
+  intercept <- coefficients[1]
+  slope <- coefficients[2]
+
+  # Calculate yield based on the site quality
+  yields <- intercept + slope * site_quality
+  return(yields)
+}
+
+
+adjust_yield_for_pollination <- function(yield_condition, yield_sensitive_crop, delta_i_cp, delta_cp) {
+  # Adjust yield for pollination effect
+  adjusted_yield <- yield_condition + yield_sensitive_crop * (delta_i_cp - delta_cp) / delta_cp
+  return(adjusted_yield)
+}
+
+
+adjust_yield_for_edge_effects <- function(yield, edge_factor) {
+  # Adjust yield for edge effects
+  adjusted_yield <- yield * edge_factor
+  return(adjusted_yield)
+}
+
+
+#since calculation of yields with coefficients was not reproducable
+#the yields were taken from
+#https://www.destatis.de/EN/Themes/Economic-Sectors-Enterprises/Agriculture-Forestry-Fisheries/Field-Crops-Grassland/Tables/field-crops-and-grassland-comparison.html#61776
+#https://www.destatis.de/EN/Themes/Economic-Sectors-Enterprises/Agriculture-Forestry-Fisheries/Fruit-Vegetables-Horticulture/Tables/3-2-holdings-agruciltural-area-yield-harvest-volume.html
+#and site quality was assumed to be homogenous for all site
+#
+# data from 2023 of dt per hectare
+#
+# winter wheat 74.3
+# winter barley 68.2
+# summer barley 50.0
+# maize 96.5
+# ########silage maze 421.3
+# autumn oilseed rape 35.8
+# peas  52.2
+# sugar beet 797.3
+# potato 438.5
+# alfalfa
+# set aside
+# flowering strips
+#
+yield_dt_per_hecatre<-c(74.3,68.2,50.0,96.5,35.8,52.2,797.3,438.5,0,0)
+#
+#historical commodety prices taken from
+#https://www.stmelf.bayern.de/idb/default.html
+#
+#
+# data from 2021-2023 of euro per deciton
+#
+# winter wheat 27.81
+# winter barley 22.74
+# summer barley 28.95
+# maize 27.03
+# autumn oilseed rape 56.64
+# peas  32.53
+# sugar beet 5.58
+# potato 24.32
+# alfalfa
+# set aside
+# flowering strips
+#
+price_per_dt<-c(27.81,22.74,28.95,27.03,56.64,32.53,5.58,24.32,0,0)
+#
+#nutrient removal
+#https://www.stmelf.bayern.de/idb/default.html
+#               kg/dt	       N      P2O5    K2O
+# winter wheat               2.11   0.8     0.55
+# winter barley              1.65   0.8     0.6
+# summer barley              1.38   0.8     0.6
+# maize                      1.38   0.8     0.5
+# autumn oilseed rape        3.35   1.8     1.0
+# peas                       -4.5    1.0     1.0
+# sugar beet                 0.18   0.1     0.25
+# potato                     0.35   0.14    0.6
+# alfalfa
+# set aside
+# flowering strips
+#
+nutrient_removal_kg_per_dt_N<-c(2.11,1.65,1.38,1.38,3.35, -4.5, 0.18, 0.35 ,0 ,0)
+nutrient_removal_kg_per_dt_PO <-c(0.8,0.8,0.8,0.8,1.8,1.0,0.1,0.14,0,0)
+nutrient_removal_kg_per_dt_K<-c(0.55,0.6,0.6,0.5,1.0,1.0,0.25,0.6,0,0)
+
+#fertlizer cost euro/kg
+#
+# N     2.22
+# P2O5	1.18
+# K2O   1.38
+
+fertilizer_cost_per_kg<-c(2.22,1.18,1.38)
+
+
+# yield dependant costs per dt
+#
+# winter wheat   4.04
+# winter barley  4.04
+# summer barley  4.04
+# maize          5.67
+# oilseed rape   25.96
+# peas           26.47
+# sugar beet     0
+# potato         1.29
+# alfalfa
+# set aside
+# flowering strips
+
+yield_dependant_cost_per_dt<-c(4.04,4.04,4.04,5.67,25.96,26.47,0,1.29,0,0,0)
+
+
+# other variable costs per hectar (seeds pestisides machinery insurance)
+#
+# winter wheat   102.4 178.7 316.4 34.9  632.4
+# winter barley  122.0 193.3 309.8 33.0  658.1
+# summer barley  116.1 123.2 304.4 28.5  572.2
+# maize          216.6 128.0 344.0 55.5  744.1
+# oilseed rape   69.3  147.7 336.3 71.4  624.7
+# peas           118.3 100.9 301.7 56.3  577.2
+# sugar beet     298.2 452.9 491.5 96.4  1339
+# potato         973.0 491.7 569.3 163.9 2197.9
+# alfalfa
+# set aside
+# flowering strips
+
+other_variable_costs_per_hectare<-c(632.4,658.1,572.2,744.1,624.7,577.2,1339,2197.9,0,0,0)
