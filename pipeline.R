@@ -54,7 +54,7 @@ field_map_with_crops<-plot_by_crop(field_map,method = 2)
 
 
 #############
-# step 4 add the field edges
+# step 4 add the field edges and the edge effect map
 ############
 #edge width 0-10
 edge <- 10
@@ -75,6 +75,19 @@ edge_adder <- function(x, y) {
 
 # Apply the function using overlay
 field_map_dist_w_edge <- overlay(rasterized_lines, field_map_dist, fun = edge_adder)
+
+
+#edge effect map
+edge_effect <- 10
+edge_effect<- edge + edge_effect
+distance_buffer_effect <- raster::buffer(lines, width = edge_effect)
+r <- raster::raster(raster::extent(field_map_dist), resolution = 1)
+rasterized_lines_effect <- raster::rasterize(distance_buffer_effect, r,field=1)
+raster::plot(rasterized_lines_effect)
+rasterized_lines_effect[is.na(rasterized_lines_effect[])] <- 0
+plot(rasterized_lines_effect)
+raster::values(rasterized_lines_effect) <- ifelse(raster::values(rasterized_lines_effect) == 1, 1, 0)
+
 
 #############
 # step 5 setup the price/yield/cost metrixes
@@ -99,7 +112,13 @@ government_payments<-c(0,0,0,0,0,0,0,0,0,0,0,0)
 
 
 #############
-# step 6 run calculate_gross_margin_grid_cell so it calculates gross margin on each cell and return a corresponding matrix
+# step 6 run run the polinator model
+############
+
+
+
+#############
+# step 7 run calculate_gross_margin_grid_cell so it calculates gross margin on each cell and return a corresponding matrix
 ############
 
  # Final economic model for each grid cell
