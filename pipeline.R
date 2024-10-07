@@ -158,7 +158,12 @@ government_payments<-c(0,0,0,0,0,0,0,0,0,0,0,0)
    return(gross_margin)
  }
 
- apply_function_to_raster <- function(cell_value) {
+ apply_function_to_raster <- function(raster_stack) {
+
+   cell_value <- raster_stack[[1]]
+   edge_value <- raster_stack[[2]]
+
+
    if (is.na(cell_value) || cell_value ==0) {
      return(NA)  # Handle NA values
    }
@@ -170,8 +175,9 @@ government_payments<-c(0,0,0,0,0,0,0,0,0,0,0,0)
  }
 
  # Use calc to apply the function across the raster
- output_raster <- calc(field_map_dist_w_edge, apply_function_to_raster)
- plot(output_raster)
+ s<-raster::stack(field_map_dist_w_edge,rasterized_lines_effect)
+ output_raster <- calc(s, apply_function_to_raster)
+ raster::plot(output_raster)
  raster_sum <- cellStats(output_raster, stat = 'sum')
  raster_sum/400
 #############
