@@ -78,15 +78,14 @@ field_map_dist_w_edge <- overlay(rasterized_lines, field_map_dist, fun = edge_ad
 
 
 #edge effect map
-edge_effect <- 10
-edge_effect<- edge + edge_effect
-distance_buffer_effect <- raster::buffer(lines, width = edge_effect)
-r <- raster::raster(raster::extent(field_map_dist), resolution = 1)
+edge_effect <- 25
+edge_effect <- edge + edge_effect
+s <- sf::st_as_sf(lines)
+distance_buffer_effect <- sf::st_buffer(s, dist = edge_effect)
 rasterized_lines_effect <- raster::rasterize(distance_buffer_effect, r,field=1)
-raster::plot(rasterized_lines_effect)
 rasterized_lines_effect[is.na(rasterized_lines_effect[])] <- 0
 plot(rasterized_lines_effect)
-raster::values(rasterized_lines_effect) <- ifelse(raster::values(rasterized_lines_effect) == 1, 1, 0)
+#raster::values(rasterized_lines_effect) <- ifelse(raster::values(rasterized_lines_effect) == 1, 1, 0)
 
 
 #############
