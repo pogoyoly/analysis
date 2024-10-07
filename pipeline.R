@@ -102,7 +102,6 @@ government_payments<-c(0,0,0,0,0,0,0,0,0,0,0,0)
 # step 6 run calculate_gross_margin_grid_cell so it calculates gross margin on each cell and return a corresponding matrix
 ############
 
-
  # Final economic model for each grid cell
  calculate_gross_margin_grid_cell <- function(cell_value,edge,yield_dt_per_cell,price_per_dt,nutrient_removal_kg_per_dt_N,
                                               nutrient_removal_kg_per_dt_PO, nutrient_removal_kg_per_dt_K,fertilizer_cost_per_kg,
@@ -137,6 +136,7 @@ government_payments<-c(0,0,0,0,0,0,0,0,0,0,0,0)
 
    # Gross margin
    gross_margin <- calculate_gross_margin(revenue, fert_cost, yield_costs, other_costs)
+
    return(gross_margin)
  }
 
