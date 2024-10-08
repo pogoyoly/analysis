@@ -57,7 +57,7 @@ field_map_with_crops<-plot_by_crop(field_map,method = 2)
 # step 4 add the field edges and the edge effect map
 ############
 #edge width 0-10
-edge <- 10
+edge <- 8
 field_map_dist<-raster::disaggregate(field_map_with_crops, fact=10)
 r <- raster::raster(raster::extent(field_map_dist), resolution = 1)
 lines <- as(polygons, "SpatialLines")
@@ -121,12 +121,16 @@ government_payments<-c(0,0,0,0,0,0,0,0,0,0,0,0)
 ############
 
  # Final economic model for each grid cell
- calculate_gross_margin_grid_cell <- function(cell_value,edge,yield_dt_per_cell,price_per_dt,nutrient_removal_kg_per_dt_N,
+ calculate_gross_margin_grid_cell <- function(cell_value,edge_value,edge,yield_dt_per_cell,price_per_dt,nutrient_removal_kg_per_dt_N,
                                               nutrient_removal_kg_per_dt_PO, nutrient_removal_kg_per_dt_K,fertilizer_cost_per_kg,
                                               yield_dependant_cost_per_dt, other_variable_costs_per_cell, government_payments) {
 
 
    yields <- yield_dt_per_cell[cell_value]
+   #correct for yield depression on edges
+   if(edge_value == 1){
+     yields <- yields * 0.952
+   }
    price <- price_per_dt[cell_value]
    nutrient_removal_N <- nutrient_removal_kg_per_dt_N[cell_value]
    nutrient_removal_PO <- nutrient_removal_kg_per_dt_PO[cell_value]
@@ -141,7 +145,7 @@ government_payments<-c(0,0,0,0,0,0,0,0,0,0,0,0)
 
    # fertlizer cost + adjusted for nitrogen fixation
    fert_amounts<-calculate_fertilizer_amount(yields, nutrient_removal_N,
-                                             nutrient_removal_PO, nutrient_removal_K,1)
+                                             nutrient_removal_PO, nutrient_removal_K,edge_value,edge)
 
    # Total fertilizer costs
    fert_cost <- calculate_total_fertilizer_costs(fert_amounts, fertilizer_cost_per_kg)
@@ -167,7 +171,7 @@ government_payments<-c(0,0,0,0,0,0,0,0,0,0,0,0)
    if (is.na(cell_value) || cell_value ==0) {
      return(NA)  # Handle NA values
    }
-   return(calculate_gross_margin_grid_cell(cell_value,edge, yield_dt_per_cell, price_per_dt,
+   return(calculate_gross_margin_grid_cell(cell_value,edge_value,edge, yield_dt_per_cell, price_per_dt,
                                            nutrient_removal_kg_per_dt_N, nutrient_removal_kg_per_dt_PO,
                                            nutrient_removal_kg_per_dt_K, fertilizer_cost_per_kg,
                                            yield_dependant_cost_per_dt, other_variable_costs_per_cell,
@@ -226,16 +230,21 @@ calculate_revenue <- function(yields, sales_prices, gov_payments) {
 
 # Input: Expected yields, nutrient removal, edge factor, crop shares
 calculate_fertilizer_amount <- function(yields, nutrient_removal_N,
-                                        nutrient_removal_PO, nutrient_removal_K,edge_factor ) {
+                                        nutrient_removal_PO, nutrient_removal_K,edge_factor,edge ) {
 
-  #for narrow 1.048
+  edge_coef <- 1
+  if(edge_factor == 1 && edge > 5){
+    edge_coef <- 1.052
+  }
+  if(edge_factor == 1 && edge < 5){
+    edge_coef <- 1.052
+  }
 
-  #for broad 1.052
 
   # Calculate fertilizer amount for each crop and nutrient
-  fert_amounts_N <- yields * nutrient_removal_N * edge_factor
-  fert_amounts_PO <- yields * nutrient_removal_PO * edge_factor
-  fert_amounts_K <- yields * nutrient_removal_K * edge_factor
+  fert_amounts_N <- yields * nutrient_removal_N * edge_coef
+  fert_amounts_PO <- yields * nutrient_removal_PO * edge_coef
+  fert_amounts_K <- yields * nutrient_removal_K * edge_coef
 
   fert_amounts <- c(fert_amounts_N,fert_amounts_PO,fert_amounts_K)
 
