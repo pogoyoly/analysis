@@ -1,6 +1,7 @@
 library(LGrafEU)
 library(raster)
 library(terra)
+library(poll4pop)
 #############
 # step 1 create map
 ############
@@ -10,16 +11,16 @@ library(terra)
 # % arabal land considered as perm grassland 0-5
 # seminal natural habitat 1 - arable area randomly divided between forest and grassland
 
-calcGras<- 25
-forest <- 25
+calcGras<- 5
+forest <- 5
 arable <- 100 - calcGras - forest
 
-r<-generate_perlin_noise(200,200,1,2,3,0.01,TRUE,cat_method = "land_percentage", percetange= (100 - forest))
-raster::plot(r)
-test<-establish_by_place_conquer(potential_space= r,
+perlin<-generate_perlin_noise(200,200,1,2,3,0.01,TRUE,cat_method = "land_percentage", percetange= (100 - forest))
+#raster::plot(r)
+test<-establish_by_place_conquer(potential_space= perlin,
                                  cell_size=10,
                                  includsion_value = 1,
-                                 mean_field_size = 1000,
+                                 mean_field_size = 500,
                                  sd_field_size = 25,
                                  distribution = "norm",
                                  mean_shape_index = 1,
@@ -32,14 +33,14 @@ test<-establish_by_place_conquer(potential_space= r,
 
 
 
-raster::plot(test$map)
+#raster::plot(test$map)
 
 
 field_map<-test$map
 raster::values(field_map) <- ifelse(raster::values(field_map) > 0, 1, NA)
-raster::plot(field_map,add = TRUE)
+#raster::plot(field_map,add = TRUE)
 polygons <- raster::rasterToPolygons(test$map, n=8,fun=function(x){x > 0}, na.rm=TRUE, digits=12, dissolve=TRUE)
-raster::plot(polygons, add = TRUE, border = "black", lwd = 1)
+#raster::plot(polygons, add = TRUE, border = "black", lwd = 1)
 
 
 #############
@@ -47,25 +48,25 @@ raster::plot(polygons, add = TRUE, border = "black", lwd = 1)
 ############
 
 crops_matrix <- data.frame(crop = c("winter wheat", "winter barley", "summer barley", "maize" ,"oilseed", "peas", "sugar beet", "potatoe", "alfalfa", "lay", "flower strips"),
-                           percentage = c(0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0),
+                           percentage = c(0.34, 0.21, 0.16, 0.06, 0.15, 0.0, 0.05, 0.03, 0.0, 0.0, 0),
                            index = c(1,2,3,4,5,6,7,8,9,10,11))  # Desired percentages
 field_map<-distrubution_by_percent(test,crops_matrix)
 field_map_with_crops<-plot_by_crop(field_map,method = 2)
 
 
 #############
-# step 4 add the field edges and the edge effect map
+# step 4 add the field edges and the edge effect map as well as the forest and calcarous grasland
 ############
 #edge width 0-10
-edge <- 8
+edge <- 4
 field_map_dist<-raster::disaggregate(field_map_with_crops, fact=10)
 r <- raster::raster(raster::extent(field_map_dist), resolution = 1)
 lines <- as(polygons, "SpatialLines")
 distance_buffer <- raster::buffer(lines, width = edge)
 rasterized_lines <- raster::rasterize(distance_buffer, r,field=1)
-raster::plot(rasterized_lines)
+#raster::plot(rasterized_lines)
 rasterized_lines[is.na(rasterized_lines[])] <- 0
-plot(rasterized_lines)
+#plot(rasterized_lines)
 #raster::values(rasterized_lines) <- ifelse(raster::values(rasterized_lines) == 1, 10, 0)
 
 edge_adder <- function(x, y) {
@@ -84,35 +85,138 @@ s <- sf::st_as_sf(lines)
 distance_buffer_effect <- sf::st_buffer(s, dist = edge_effect)
 rasterized_lines_effect <- raster::rasterize(distance_buffer_effect, r,field=1)
 rasterized_lines_effect[is.na(rasterized_lines_effect[])] <- 0
-plot(rasterized_lines_effect)
+#plot(rasterized_lines_effect)
 #raster::values(rasterized_lines_effect) <- ifelse(raster::values(rasterized_lines_effect) == 1, 1, 0)
+
+
+#add the calcerous and the grassland to the maps
+forcalcsum <- function(x, y) {
+  z <- x * -2  + y * - 1
+  z <- z + 15
+  return(z)        # Return the modified y values
+}
+
+calcr<-plot_by_arable_land(test, method = 2)
+perlin_dis<-raster::disaggregate(perlin, fact=10)
+calcr<-raster::disaggregate(calcr, fact=10)
+extent(perlin_dis)<-extent(calcr)
+for_and_calc <- overlay(calcr,perlin_dis, fun = forcalcsum)
+for_and_calc[for_and_calc < 13] <- 0
+
+full_stack<-stack(for_and_calc,field_map_dist_w_edge)
+full_maping <- function(stack) {
+  x<-stack[[1]]
+  y<-stack[[2]]
+  if(x > 0){
+    j <-x
+  }
+  else{
+    j <- y
+  }
+  return(j)        # Return the modified y values
+}
+full_map <- calc(full_stack, full_maping)
+
+#plot(for_and_calc)
 
 
 #############
 # step 5 setup the price/yield/cost metrixes
 ############
-yield_dt_per_hecatre<-c(74.3,68.2,50.0,96.5,35.8,52.2,797.3,438.5,0,0,0,0)
+yield_dt_per_hecatre<-c(74.3,68.2,50.0,96.5,35.8,52.2,797.3,438.5,0,0,0,0,0,0)
 yield_dt_per_cell<-yield_dt_per_hecatre / 10000
-price_per_dt<-c(27.81,22.74,28.95,27.03,56.64,32.53,5.58,24.32,0,0,0,0)
+price_per_dt<-c(27.81,22.74,28.95,27.03,56.64,32.53,5.58,24.32,0,0,0,0,0,0)
 
-nutrient_removal_kg_per_dt_N<-c(2.11,1.65,1.38,1.38,3.35, -4.5, 0.18, 0.35 ,0 ,0,0,0)
+nutrient_removal_kg_per_dt_N<-c(2.11,1.65,1.38,1.38,3.35, -4.5, 0.18, 0.35 ,0 ,0,0,0,0,0)
 
-nutrient_removal_kg_per_dt_PO <-c(0.8,0.8,0.8,0.8,1.8,1.0,0.1,0.14,0,0,0,0)
+nutrient_removal_kg_per_dt_PO <-c(0.8,0.8,0.8,0.8,1.8,1.0,0.1,0.14,0,0,0,0,0,0)
 
-nutrient_removal_kg_per_dt_K<-c(0.55,0.6,0.6,0.5,1.0,1.0,0.25,0.6,0,0,0,0)
+nutrient_removal_kg_per_dt_K<-c(0.55,0.6,0.6,0.5,1.0,1.0,0.25,0.6,0,0,0,0,0,0)
 
 fertilizer_cost_per_kg<-c(2.22,1.18,1.38,0)
 
-yield_dependant_cost_per_dt<-c(4.04,4.04,4.04,5.67,25.96,26.47,0,1.29,0,0,0,0,0)
+yield_dependant_cost_per_dt<-c(4.04,4.04,4.04,5.67,25.96,26.47,0,1.29,0,0,0,0,0,0,0)
 
-other_variable_costs_per_hectare<-c(632.4,658.1,572.2,744.1,624.7,577.2,1339,2197.9,0,0,0,0,0)
+other_variable_costs_per_hectare<-c(632.4,658.1,572.2,744.1,624.7,577.2,1339,2197.9,0,0,0,0,0,0,0)
 other_variable_costs_per_cell<-other_variable_costs_per_hectare/10000
-government_payments<-c(0,0,0,0,0,0,0,0,0,0,0,0)
+government_payments<-c(0,0,0,0,0,0,0,0,0,0,0,0,0,0)
 
 
 #############
 # step 6 run run the polinator model
 ############
+#plot(field_map_dist_w_edge)
+reindex_for_poll_model = c(30,30,30,32,33,37,42,38,37,10,0,11,4,22)  # Desired percentages
+reindex_raster<-function(cell_val){
+  if(cell_val == 0){
+    val<- 0
+  }
+  else{
+    val <- reindex_for_poll_model[cell_val]
+  }
+  return(val)
+}
+poll_raster <- calc(full_map, reindex_raster)
+
+#plot(poll_raster)
+
+r_grassmargins <- full_map
+r_grassmargins[full_map > 0] <- 0
+
+r_flowermargins <- full_map
+r_flowermargins[full_map > 0] <- 0
+
+new_param<-poll4pop::parameters
+
+nf<-computeFloralNesting(landuseMap=full_map, edgesMap=r_grassmargins, unitEdges = "sqm", widthEdges=1,
+                         landuseCodes, bees=c("GroundNestingBumblebees", "GroundNestingSolitaryBees"), num_floral=3,
+                         florNestInfo=new_param$florNestInfo, codeEdges=c(5), cell.size = 1,paramList=new_param)
+
+#plot(nf$nest$GroundNestingBumblebees)
+
+poll<-runpoll_3seasons(M_poll0 = numeric(0), firstyear=TRUE, firstyearfactor = c(1, 1),
+                       bees = c("GroundNestingBumblebees", "GroundNestingSolitaryBees"), cell.size = 1, paramList=new_param, nest=nf$nest,
+                       floral=nf$floral, cutoff = 0.99, loc_managed)
+
+nf2<-computeFloralNesting(landuseMap=full_map, edgesMap=r_grassmargins, unitEdges = "sqm", widthEdges=1,
+                          landuseCodes, bees=c("GroundNestingBumblebees", "GroundNestingSolitaryBees"), num_floral=3,
+                          florNestInfo=new_param$florNestInfo, codeEdges=c(5), cell.size = 1,paramList=new_param)
+
+
+poll2<-runpoll_3seasons(M_poll0 = poll$M_poll, firstyear=FALSE, firstyearfactor = c(1, 1),
+                        bees = c("GroundNestingBumblebees", "GroundNestingSolitaryBees"), cell.size = 1, paramList=new_param, nest=nf2$nest,
+                        floral=nf2$floral, cutoff = 0.99, loc_managed)
+
+
+
+service_stack <- stack(poll2$flowvis$GroundNestingBumblebees[[2]],
+                       poll2$floral$GroundNestingBumblebees[[2]],full_map)
+
+devider <- function(stack) {
+  val1<-stack[[1]]
+  val2<-stack[[2]]
+  val3<-stack[[3]]
+ if(val3 == 5){
+  j<- val1
+  }
+  else{
+    j <- 0
+  }
+
+  return(j)
+}
+
+# Apply the function using overlay
+pollination_service <- calc(service_stack, devider)
+
+#plot(pollination_service)
+
+values_greater_than_zero <- pollination_service[pollination_service > 0]
+
+
+# Calculate the mean of values greater than 0
+max_visitation <- max(values_greater_than_zero, na.rm = TRUE)
+
 
 
 
@@ -121,7 +225,7 @@ government_payments<-c(0,0,0,0,0,0,0,0,0,0,0,0)
 ############
 
  # Final economic model for each grid cell
- calculate_gross_margin_grid_cell <- function(cell_value,edge_value,edge,yield_dt_per_cell,price_per_dt,nutrient_removal_kg_per_dt_N,
+ calculate_gross_margin_grid_cell <- function(cell_value,edge_value,edge,visitation,max_visitation,yield_dt_per_cell,price_per_dt,nutrient_removal_kg_per_dt_N,
                                               nutrient_removal_kg_per_dt_PO, nutrient_removal_kg_per_dt_K,fertilizer_cost_per_kg,
                                               yield_dependant_cost_per_dt, other_variable_costs_per_cell, government_payments) {
 
@@ -131,6 +235,11 @@ government_payments<-c(0,0,0,0,0,0,0,0,0,0,0,0)
    if(edge_value == 1){
      yields <- yields * 0.952
    }
+   #correct for pollination
+   if(cell_value == 5 ){
+     yields <- adjust_yield_for_pollination(yields, 0.21, visitation, max_visitation)
+   }
+
    price <- price_per_dt[cell_value]
    nutrient_removal_N <- nutrient_removal_kg_per_dt_N[cell_value]
    nutrient_removal_PO <- nutrient_removal_kg_per_dt_PO[cell_value]
@@ -139,6 +248,7 @@ government_payments<-c(0,0,0,0,0,0,0,0,0,0,0,0)
    yield_cost <- yield_dependant_cost_per_dt[cell_value]
    other_cost <- other_variable_costs_per_cell[cell_value]
    gov_payment <- government_payments[cell_value]
+
 
    # Calculate revenue
    revenue <- calculate_revenue(yields, price, gov_payment)
@@ -166,12 +276,14 @@ government_payments<-c(0,0,0,0,0,0,0,0,0,0,0,0)
 
    cell_value <- raster_stack[[1]]
    edge_value <- raster_stack[[2]]
+   visitation <- raster_stack[[3]]
 
 
    if (is.na(cell_value) || cell_value ==0) {
      return(NA)  # Handle NA values
    }
-   return(calculate_gross_margin_grid_cell(cell_value,edge_value,edge, yield_dt_per_cell, price_per_dt,
+   return(calculate_gross_margin_grid_cell(cell_value,edge_value,edge,visitation,max_visitation,
+                                           yield_dt_per_cell, price_per_dt,
                                            nutrient_removal_kg_per_dt_N, nutrient_removal_kg_per_dt_PO,
                                            nutrient_removal_kg_per_dt_K, fertilizer_cost_per_kg,
                                            yield_dependant_cost_per_dt, other_variable_costs_per_cell,
@@ -179,11 +291,13 @@ government_payments<-c(0,0,0,0,0,0,0,0,0,0,0,0)
  }
 
  # Use calc to apply the function across the raster
- s<-raster::stack(field_map_dist_w_edge,rasterized_lines_effect)
+ s<-raster::stack(full_map,rasterized_lines_effect,pollination_service)
  output_raster <- calc(s, apply_function_to_raster)
- raster::plot(output_raster)
+ #raster::plot(pollination_service)
+
+
  raster_sum <- cellStats(output_raster, stat = 'sum')
- raster_sum/400
+ raster_sum/ (400 * (arable/ 100)) #400 hectares in the landscape multiplied by the percentage of arable land
 #############
 # step 7 arrange a full list of matrices of intrest in a dataframe
 ############
@@ -329,12 +443,13 @@ calculate_yield <- function(site_quality, coefficients) {
 }
 
 
-adjust_yield_for_pollination <- function(yield_condition, yield_sensitive_crop, delta_i_cp, delta_cp) {
+adjust_yield_for_pollination <- function(yield, sensitivity, visitation, max_visitation) {
   # Adjust yield for pollination effect
-  adjusted_yield <- yield_condition + yield_sensitive_crop * (delta_i_cp - delta_cp) / delta_cp
+  adjusted_yield <- (1 - sensitivity) * yield - yield * sensitivity * ((visitation - max_visitation) / max_visitation)
   return(adjusted_yield)
 }
 
+adjust_yield_for_pollination(yield_dt_per_cell[5], 0.21, 0.0 ,0.4146886)
 
 adjust_yield_for_edge_effects <- function(yield, edge_factor) {
 
@@ -448,3 +563,13 @@ yield_dependant_cost_per_dt<-c(4.04,4.04,4.04,5.67,25.96,26.47,0,1.29,0,0,0)
 # flowering strips
 
 other_variable_costs_per_hectare<-c(632.4,658.1,572.2,744.1,624.7,577.2,1339,2197.9,0,0,0)
+
+#share of crops in germany
+#https://www.destatis.de/EN/Themes/Economic-Sectors-Enterprises/Agriculture-Forestry-Fisheries/Field-Crops-Grassland/Tables/field-crops-and-grassland-comparison.html#61772
+#5,775.9 + 289.3 + 441.9 + 1,091.9 = 7599
+#wheat 0.34
+#barley 0.21
+#maize 0.06
+#rape 0.15
+#potatoe 0.03
+#sugar beet 0.05
